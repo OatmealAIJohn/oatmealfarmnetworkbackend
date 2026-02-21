@@ -6,8 +6,11 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-                   "https://your-react-app.cloudrun.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://oatmealfarmnewtorkbackend-802455386518.us-central1.run.app",
+        "https://your-react-app-url.run.app"  # add your frontend URL here
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

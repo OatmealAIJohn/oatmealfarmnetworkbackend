@@ -28,12 +28,12 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         token = create_access_token(data={"sub": user.PeopleID})
 
         return {
-            "access_token": token,
+            "AccessToken": token,
             "token_type": "bearer",
-            "people_id": user.PeopleID,
-            "first_name": user.PeopleFirstName,
-            "last_name": user.PeopleLastName,
-            "access_level": user.accesslevel or 0
+            "PeopleID": user.PeopleID,
+            "PeopleFirstName": user.PeopleFirstName,
+            "PeopleLastName": user.PeopleLastName,
+            "AccessLevel": user.accesslevel or 0
         }
     except HTTPException:
         raise
@@ -45,9 +45,57 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me")
 def get_me(current_user=Depends(get_current_user)):
     return {
-        "people_id": current_user.PeopleID,
-        "first_name": current_user.PeopleFirstName,
-        "last_name": current_user.PeopleLastName,
-        "email": current_user.PeopleEmail,
-        "access_level": current_user.accesslevel
+        "PeopleID": current_user.PeopleID,
+        "PeopleFirstName": current_user.PeopleFirstName,
+        "PeopleLastName": current_user.PeopleLastName,
+        "PeopleEmail": current_user.PeopleEmail,
+        "AccessLevel": current_user.accesslevel
     }
+
+@router.get("/my-businesses")
+def GetMyBusinesses(PeopleID: int, Db: Session = Depends(get_db)):
+    Businesses = (
+        Db.query(models.Business)
+        .join(models.BusinessAccess, models.Business.BusinessID == models.BusinessAccess.BusinessID)
+        .filter(
+            models.BusinessAccess.PeopleID == PeopleID,
+            models.BusinessAccess.Active == 1
+        )
+        .all()
+    )
+    return [{"BusinessID": B.BusinessID, "BusinessName": B.BusinessName} for B in Businesses]
+
+
+@router.get("/account-home")
+def GetAccountHome(BusinessID: int, Db: Session = Depends(get_db)):
+    Result = (
+        Db.query(
+            models.Business,
+            models.BusinessTypeLookup,
+            models.Address,
+        )
+        .join(models.BusinessTypeLookup, models.Business.BusinessTypeID == models.BusinessTypeLookup.BusinessTypeID)
+        .join(models.Address, models.Business.AddressID == models.Address.AddressID)
+        .filter(models.Business.BusinessID == BusinessID)
+        .first()
+    )
+
+    if not Result:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    B, BT, A = Result
+
+    return {
+        "BusinessID": B.BusinessID,
+        "BusinessName": B.BusinessName,
+        "BusinessEmail": B.BusinessEmail,
+        "BusinessTypeID": BT.BusinessTypeID,
+        "BusinessType": BT.BusinessType,
+        "SubscriptionLevel": B.SubscriptionLevel,
+        "SubscriptionEndDate": str(B.SubscriptionEndDate) if hasattr(B, 'SubscriptionEndDate') else None,
+        "AddressCity": A.AddressCity,
+        "AddressState": A.AddressState,
+        "AddressStreet": A.AddressStreet,
+        "AddressZip": A.AddressZip,
+    }
+

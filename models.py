@@ -22,15 +22,19 @@ class People(Base):
 class Business(Base):
     __tablename__ = "Business"
     BusinessID        = Column(Integer, primary_key=True, index=True)
+    BusinessTypeID    = Column(Integer)
     BusinessName      = Column(String(1000))
     BusinessEmail     = Column(String(100))
     BusinessPhone     = Column(String(50))
     AddressID         = Column(Integer)
     SubscriptionLevel = Column(Integer)
+    SubscriptionEndDate = Column(DateTime)
+    SubscriptionStartDate = Column(DateTime)
     AccessLevel       = Column(Integer)
     BusinessFacebook  = Column(String(255))
     BusinessInstagram = Column(String(255))
 
+    
 # ── ADDRESS ─────────────────────────────────────────────────────
 class Address(Base):
     __tablename__ = "Address"
@@ -111,3 +115,25 @@ class Field(Base):
     Longitude      = Column(Decimal(9,6))
     FieldSizeHectares = Column(Decimal(10,2))
     PlantingDate   = Column(Date)
+
+
+# ── BUSINESS ACCESS ──────────────────────────────────────────────
+class BusinessAccess(Base):
+    __tablename__ = "BusinessAccess"
+    BusinessAccessID = Column(Integer, primary_key=True, index=True)
+    BusinessID       = Column(Integer)
+    PeopleID         = Column(Integer)
+    AccessLevelID    = Column(Integer)
+    Active           = Column(SmallInteger)
+    CreatedAt        = Column(DateTime)
+    RevokedAt        = Column(DateTime)
+    Role             = Column(String(100))
+
+
+# ── BUSINESS TYPE LOOKUP ─────────────────────────────────────────
+class BusinessTypeLookup(Base):
+    __tablename__ = "businesstypelookup"
+    BusinessTypeID      = Column(Integer, primary_key=True, index=True)
+    BusinessType        = Column(String(255))
+    BusinessTypeIcon    = Column(String(255))
+    BusinessTypeIDOrder = Column(Integer)

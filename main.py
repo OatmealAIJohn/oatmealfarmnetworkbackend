@@ -55,3 +55,6 @@ def test_people2():
         return {"error": str(e)}
     finally:
         db.close()
+
+
+        

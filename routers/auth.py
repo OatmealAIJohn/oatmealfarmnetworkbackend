@@ -18,7 +18,6 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             models.People.PeopleEmail == request.Email,
             models.People.PeopleActive == 1
         ).first()
-
         if not user or user.PeoplePassword != request.Password:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

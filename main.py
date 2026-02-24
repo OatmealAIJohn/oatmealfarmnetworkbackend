@@ -59,5 +59,4 @@ def test_people2():
     finally:
         db.close()
 
-
         

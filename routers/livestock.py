@@ -1,0 +1,211 @@
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from database import get_db
+import time
+
+router = APIRouter(prefix="/api/livestock", tags=["livestock"])
+
+SLUG_TO_SPECIES_ID = {
+    'alpacas': 2, 'bison': 9, 'buffalo': 34, 'camels': 18, 'cattle': 8,
+    'chickens': 13, 'crocodiles': 25, 'dogs': 3, 'deer': 21, 'donkeys': 7, 'ducks': 15,
+    'emus': 19, 'geese': 22, 'goats': 6, 'guinea-fowl': 26, 'honey-bees': 23,
+    'horses': 5, 'llamas': 4, 'musk-ox': 27, 'ostriches': 28, 'pheasants': 29,
+    'pigs': 12, 'pigeons': 30, 'quails': 31, 'rabbits': 11, 'sheep': 10,
+    'snails': 33, 'turkeys': 14, 'yaks': 17,
+}
+
+SLUG_TO_LABEL = {
+    'alpacas': 'Alpacas', 'bison': 'Bison', 'buffalo': 'Buffalo', 'camels': 'Camels',
+    'cattle': 'Cattle', 'chickens': 'Chickens', 'crocodiles': 'Crocodiles & Alligators',
+    'deer': 'Deer', 'dogs': 'Working Dogs', 'donkeys': 'Donkeys', 'ducks': 'Ducks', 'emus': 'Emus',
+    'geese': 'Geese', 'goats': 'Goats', 'guinea-fowl': 'Guinea Fowl',
+    'honey-bees': 'Honey Bees', 'horses': 'Horses', 'llamas': 'Llamas',
+    'musk-ox': 'Musk Ox', 'ostriches': 'Ostriches', 'pheasants': 'Pheasants',
+    'pigs': 'Pigs', 'pigeons': 'Pigeons', 'quails': 'Quails', 'rabbits': 'Rabbits',
+    'sheep': 'Sheep', 'snails': 'Snails', 'turkeys': 'Turkeys', 'yaks': 'Yaks',
+}
+
+# Simple in-memory cache
+_cache = {}
+CACHE_TTL = 300  # 5 minutes
+
+def cache_get(key):
+    entry = _cache.get(key)
+    if entry and time.time() - entry['t'] < CACHE_TTL:
+        return entry['v']
+    return None
+
+def cache_set(key, value):
+    _cache[key] = {'v': value, 't': time.time()}
+
+
+@router.get("/counts")
+def get_counts(db: Session = Depends(get_db)):
+    try:
+        cached = cache_get('counts')
+        if cached:
+            return cached
+
+        rows = db.execute(
+            text("SELECT SpeciesID, COUNT(*) AS BreedCount FROM SpeciesBreedLookupTable GROUP BY SpeciesID")
+        ).fetchall()
+        id_to_count = {r.SpeciesID: r.BreedCount for r in rows}
+        counts = {}
+        total = 0
+        for slug, sid in SLUG_TO_SPECIES_ID.items():
+            val = id_to_count.get(sid, 0)
+            counts[slug] = val
+            total += val
+        result = {"counts": counts, "total": total}
+        cache_set('counts', result)
+        return result
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/species/{slug}")
+def get_species(slug: str, db: Session = Depends(get_db)):
+    try:
+        cached = cache_get(f'species_{slug}')
+        if cached:
+            return cached
+
+        species_id = SLUG_TO_SPECIES_ID.get(slug)
+        if not species_id:
+            raise HTTPException(status_code=404, detail="Species not found")
+
+        info_row = db.execute(
+            text("SELECT SingularTerm, PluralTerm, SpeciesText1, SpeciesImage1 FROM SpeciesAvailable WHERE SpeciesID = :sid"),
+            {"sid": species_id}
+        ).fetchone()
+
+        species_info = None
+        if info_row:
+            species_info = {
+                "singular": info_row.SingularTerm,
+                "plural": info_row.PluralTerm,
+                "description": info_row.SpeciesText1,
+                "main_image": info_row.SpeciesImage1,
+            }
+
+        sql = text("""
+            SELECT BreedLookupID, Breed, Breeddescription, BreedImage, BreedImageCaption
+            FROM SpeciesBreedLookupTable
+            WHERE SpeciesID = :sid
+            ORDER BY Breed
+        """)
+        rows = db.execute(sql, {"sid": species_id}).fetchall()
+
+        result = {
+            "species_info": species_info,
+            "breeds": [
+                {
+                    "breed_id": r.BreedLookupID,
+                    "breed": r.Breed,
+                    "description": r.Breeddescription,
+                    "image": r.BreedImage,
+                    "image_caption": r.BreedImageCaption,
+                }
+                for r in rows
+            ]
+        }
+        cache_set(f'species_{slug}', result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/breed/{breed_id}")
+def get_breed(breed_id: int, db: Session = Depends(get_db)):
+    try:
+        cached = cache_get(f'breed_{breed_id}')
+        if cached:
+            return cached
+
+        sql = text("""
+            SELECT BreedLookupID, Breed, Breeddescription, BreedImage,
+                   BreedImageCaption, BreedImageOrientation, Breedvideo
+            FROM SpeciesBreedLookupTable
+            WHERE BreedLookupID = :bid
+        """)
+        row = db.execute(sql, {"bid": breed_id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Breed not found")
+
+        result = {
+            "breed_id": row.BreedLookupID,
+            "breed": row.Breed,
+            "description": row.Breeddescription,
+            "image": row.BreedImage,
+            "image_caption": row.BreedImageCaption,
+            "image_orientation": row.BreedImageOrientation,
+            "video": row.Breedvideo,
+        }
+        cache_set(f'breed_{breed_id}', result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/about/{slug}")
+def get_about(slug: str, db: Session = Depends(get_db)):
+    try:
+        cached = cache_get(f'about_{slug}')
+        if cached:
+            return cached
+
+        species_id = SLUG_TO_SPECIES_ID.get(slug)
+        if not species_id:
+            raise HTTPException(status_code=404, detail="Species not found")
+
+        info_row = db.execute(
+            text("""
+                SELECT SingularTerm, PluralTerm, SpeciesDescription,
+                       SpeciesText1, SpeciesImage1, SpeciesText2, SpeciesImage2,
+                       SpeciesText3, SpeciesImage3, SpeciesText4, SpeciesImage4,
+                       SpeciesText5, SpeciesImage5, SpeciesText6, SpeciesImage6,
+                       SpeciesText7, SpeciesImage7, SpeciesText8, SpeciesImage8
+                FROM SpeciesAvailable
+                WHERE SpeciesID = :sid
+            """),
+            {"sid": species_id}
+        ).fetchone()
+
+        if not info_row:
+            raise HTTPException(status_code=404, detail="Species not found")
+
+        color_rows = db.execute(
+            text("SELECT SpeciesColor FROM SpeciesColorlookupTable WHERE SpeciesID = :sid ORDER BY SpeciesColor"),
+            {"sid": species_id}
+        ).fetchall()
+
+        sections = []
+        for i in range(2, 9):
+            txt = getattr(info_row, f'SpeciesText{i}', None)
+            img = getattr(info_row, f'SpeciesImage{i}', None)
+            if txt:
+                sections.append({"title": "", "content": txt, "image": img})
+
+        result = {
+            "singular": info_row.SingularTerm,
+            "plural": info_row.PluralTerm,
+            "about_html": info_row.SpeciesText1 or '',
+            "main_image": info_row.SpeciesImage1,
+            "sections": sections,
+            "colors": [r.SpeciesColor for r in color_rows],
+        }
+        cache_set(f'about_{slug}', result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

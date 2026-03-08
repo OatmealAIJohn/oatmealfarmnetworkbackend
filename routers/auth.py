@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
@@ -135,7 +135,6 @@ def ChangeBusinessType(BusinessID: int, BusinessTypeID: int, Db: Session = Depen
 # -------------------------
 @router.get("/animals")
 def GetAnimals(BusinessID: int, Db: Session = Depends(get_db)):
-    # Only select the columns needed
     stmt = (
         select(
             models.Animal.AnimalID,
@@ -179,3 +178,88 @@ def GetAnimals(BusinessID: int, Db: Session = Depends(get_db)):
         })
 
     return Animals
+
+# -------------------------
+# Species breeds
+# -------------------------
+@router.get("/species/{species_id}/breeds")
+def get_species_breeds(species_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    try:
+        rows = db.execute(
+            text("SELECT BreedLookupID, Breed FROM SpeciesBreedLookupTable WHERE SpeciesID = :sid AND LEFT(Breed,1) LIKE '[A-Z]' ORDER BY Breed"),
+            {"sid": species_id}
+        ).fetchall()
+        return [{"id": r.BreedLookupID, "name": r.Breed} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Species registration types
+# -------------------------
+@router.get("/species/{species_id}/registration-types")
+def get_registration_types(species_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    try:
+        rows = db.execute(
+            text("SELECT RegistrationType FROM SpeciesRegistrationLookup WHERE SpeciesID = :sid ORDER BY RegistrationType"),
+            {"sid": species_id}
+        ).fetchall()
+        return [{"type": r.RegistrationType} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+# -------------------------
+# Add animal
+# -------------------------
+@router.post("/animals/add")
+async def add_animal(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import text
+    try:
+        form = await request.form()
+        def f(key): return form.get(key) or None
+        def n(key): v = form.get(key); return float(v) if v else None
+        def i(key): v = form.get(key); return int(v) if v else None
+
+        db.execute(text("""
+            INSERT INTO Animals (
+                BusinessID, FullName, SpeciesID, NumberofAnimals, Category,
+                DOBDay, DOBMonth, DOBYear,
+                BreedID, BreedID2, BreedID3, BreedID4,
+                Height, Weight, Gaited, Warmblooded, Horns, Temperment,
+                Description, AncestryDescription,
+                PublishForSale, CoOwnerName1, CoOwnerLink1, CoOwnerBusiness1,
+                CoOwnerName2, CoOwnerLink2, CoOwnerBusiness2,
+                CoOwnerName3, CoOwnerLink3, CoOwnerBusiness3
+            ) VALUES (
+                :business_id, :name, :species_id, :num_animals, :category,
+                :dob_day, :dob_month, :dob_year,
+                :breed1, :breed2, :breed3, :breed4,
+                :height, :weight, :gaited, :Warmblooded, :horns, :temperament,
+                :description, :ancestry_desc,
+                :for_sale, :co_name1, :co_link1, :co_biz1,
+                :co_name2, :co_link2, :co_biz2,
+                :co_name3, :co_link3, :co_biz3
+            )
+        """), {
+            "business_id": i("BusinessID"), "name": f("Name"), "species_id": i("SpeciesID"),
+            "num_animals": i("NumberOfAnimals"), "category": f("Category"),
+            "dob_day": i("DOBDay"), "dob_month": i("DOBMonth"), "dob_year": i("DOBYear"),
+            "breed1": i("BreedID"), "breed2": i("BreedID2"), "breed3": i("BreedID3"), "breed4": i("BreedID4"),
+            "height": n("Height"), "weight": n("Weight"), "gaited": f("Gaited"),
+            "Warmblooded": f("Warmblooded"), "horns": f("Horns"), "temperament": i("Temperament"),
+            "description": f("Description"), "ancestry_desc": f("AncestryDescription"),
+            "for_sale": 1 if f("ForSale") == "Yes" else 0,
+            "co_name1": f("CoOwnerName1"), "co_link1": f("CoOwnerLink1"), "co_biz1": f("CoOwnerBusiness1"),
+            "co_name2": f("CoOwnerName2"), "co_link2": f("CoOwnerLink2"), "co_biz2": f("CoOwnerBusiness2"),
+            "co_name3": f("CoOwnerName3"), "co_link3": f("CoOwnerLink3"), "co_biz3": f("CoOwnerBusiness3"),
+        })
+        new_id = db.execute(text("SELECT SCOPE_IDENTITY() AS id")).fetchone()
+        db.commit()
+        return {"message": "Animal added successfully", "AnimalID": int(new_id.id)}
+    except Exception as e:
+        db.rollback()
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

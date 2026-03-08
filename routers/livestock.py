@@ -216,7 +216,23 @@ def get_breed(breed_id: int, db: Session = Depends(get_db)):
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@router.get("/species-colors/{species_id}")
+def get_species_colors(species_id: int, db: Session = Depends(get_db)):
+    cache_key = f'colors_{species_id}'
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    try:
+        rows = db.execute(
+            text("SELECT SpeciesColor FROM SpeciesColorlookupTable WHERE SpeciesID = :sid ORDER BY SpeciesColor"),
+            {"sid": species_id}
+        ).fetchall()
+        result = [r.SpeciesColor for r in rows]
+        cache_set(cache_key, result)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @router.get("/about/{slug}")
 def get_about(slug: str, db: Session = Depends(get_db)):
     cached = cache_get(f'about_{slug}')

@@ -224,3 +224,211 @@ def get_businesses(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── PROFILE endpoints ─────────────────────────────────────────────
+
+@router.get("/profile/{business_id}")
+def get_profile(business_id: int, db: Session = Depends(get_db)):
+    try:
+        from sqlalchemy import text
+
+        row = db.execute(text("""
+            SELECT
+                b.BusinessID, b.BusinessName, b.BusinessEmail,
+                b.BusinessPhone, b.AddressID, b.WebsitesID,
+                b.Contact1PeopleID,
+                a.AddressStreet, a.AddressApt, a.AddressCity,
+                a.AddressState, a.AddressZip, a.StateIndex, a.country_id,
+                w.Website,
+                p.PeopleFirstName, p.PeopleLastName, p.PeopleEmail,
+                p.PeoplePhone AS ContactPhone,
+                c.name AS country_name
+            FROM Business b
+            LEFT JOIN Address a ON b.AddressID = a.AddressID
+            LEFT JOIN Websites w ON b.WebsitesID = w.WebsitesID
+            LEFT JOIN People p ON b.Contact1PeopleID = p.PeopleID
+            LEFT JOIN country c ON a.country_id = c.country_id
+            WHERE b.BusinessID = :bid
+        """), {"bid": business_id}).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Business not found")
+
+        # Fetch phone/cell/fax from Phone table if exists
+        phone_row = None
+        if row.BusinessID:
+            phone_row = db.execute(text("""
+                SELECT Phone, CellPhone, Fax FROM Phone
+                WHERE PhoneID = (SELECT PhoneID FROM Business WHERE BusinessID = :bid)
+            """), {"bid": business_id}).fetchone()
+
+        return {
+            "BusinessID":       row.BusinessID,
+            "BusinessName":     row.BusinessName,
+            "BusinessEmail":    row.BusinessEmail,
+            "BusinessWebsite":  row.Website,
+            "AddressStreet":    row.AddressStreet,
+            "AddressApt":       row.AddressApt,
+            "AddressCity":      row.AddressCity,
+            "AddressState":     row.AddressState,
+            "AddressZip":       row.AddressZip,
+            "StateIndex":       row.StateIndex,
+            "country_id":       row.country_id,
+            "country_name":     row.country_name or "USA",
+            "ContactFirstName": row.PeopleFirstName,
+            "ContactLastName":  row.PeopleLastName,
+            "ContactEmail":     row.PeopleEmail or row.BusinessEmail,
+            "BusinessPhone":    phone_row.Phone if phone_row else row.BusinessPhone,
+            "BusinessCell":     phone_row.CellPhone if phone_row else None,
+            "BusinessFax":      phone_row.Fax if phone_row else None,
+            "WebsitesID":       row.WebsitesID,
+            "AddressID":        row.AddressID,
+            "Contact1PeopleID": row.Contact1PeopleID,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/profile/{business_id}")
+def update_profile(business_id: int, payload: dict, db: Session = Depends(get_db)):
+    try:
+        from sqlalchemy import text
+
+        # Get current IDs
+        ids = db.execute(text("""
+            SELECT AddressID, WebsitesID, Contact1PeopleID,
+                   PhoneID FROM Business WHERE BusinessID = :bid
+        """), {"bid": business_id}).fetchone()
+
+        if not ids:
+            raise HTTPException(status_code=404, detail="Business not found")
+
+        # 1. Update Address
+        if ids.AddressID:
+            db.execute(text("""
+                UPDATE Address SET
+                    AddressStreet = :street,
+                    AddressApt    = :apt,
+                    AddressCity   = :city,
+                    StateIndex    = :state,
+                    AddressZip    = :zip,
+                    country_id    = (SELECT country_id FROM country WHERE name = :country)
+                WHERE AddressID = :aid
+            """), {
+                "street":  payload.get("AddressStreet", ""),
+                "apt":     payload.get("AddressApt", ""),
+                "city":    payload.get("AddressCity", ""),
+                "state":   payload.get("StateIndex") or None,
+                "zip":     payload.get("AddressZip", ""),
+                "country": payload.get("country_name", "USA"),
+                "aid":     ids.AddressID,
+            })
+
+        # 2. Update Website
+        website = payload.get("BusinessWebsite", "")
+        if website.lower().startswith("http://"):
+            website = website[7:]
+        if ids.WebsitesID:
+            db.execute(text("UPDATE Websites SET Website = :w WHERE WebsitesID = :wid"),
+                       {"w": website, "wid": ids.WebsitesID})
+
+        # 3. Update or insert Phone
+        phone = payload.get("BusinessPhone", "")
+        cell  = payload.get("BusinessCell", "")
+        fax   = payload.get("BusinessFax", "")
+        if ids.PhoneID:
+            db.execute(text("""
+                UPDATE Phone SET Phone = :phone, CellPhone = :cell, Fax = :fax
+                WHERE PhoneID = :pid
+            """), {"phone": phone, "cell": cell, "fax": fax, "pid": ids.PhoneID})
+        else:
+            db.execute(text("""
+                INSERT INTO Phone (Phone, CellPhone, Fax) VALUES (:phone, :cell, :fax)
+            """), {"phone": phone, "cell": cell, "fax": fax})
+
+        # 4. Update Contact (People)
+        if ids.Contact1PeopleID:
+            db.execute(text("""
+                UPDATE People SET
+                    PeopleFirstName = :fn,
+                    PeopleLastName  = :ln,
+                    PeopleEmail     = :email
+                WHERE PeopleID = :pid
+            """), {
+                "fn":    payload.get("ContactFirstName", ""),
+                "ln":    payload.get("ContactLastName", ""),
+                "email": payload.get("ContactEmail", ""),
+                "pid":   ids.Contact1PeopleID,
+            })
+
+        # 5. Update Business name
+        db.execute(text("""
+            UPDATE Business SET BusinessName = :name, BusinessEmail = :email
+            WHERE BusinessID = :bid
+        """), {
+            "name":  payload.get("BusinessName", ""),
+            "email": payload.get("ContactEmail", ""),
+            "bid":   business_id,
+        })
+
+        db.commit()
+        return {"message": "Profile updated successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete/{business_id}")
+def delete_business(business_id: int, db: Session = Depends(get_db)):
+    try:
+        from sqlalchemy import text
+
+        # Get related IDs before deleting
+        ids = db.execute(text("""
+            SELECT WebsitesID, PhoneID, AddressID
+            FROM Business WHERE BusinessID = :bid
+        """), {"bid": business_id}).fetchone()
+
+        if not ids:
+            raise HTTPException(status_code=404, detail="Business not found")
+
+        # 1. Delete BusinessAccess records
+        db.execute(text("DELETE FROM BusinessAccess WHERE BusinessID = :bid"),
+                   {"bid": business_id})
+
+        # 2. Delete Business record
+        db.execute(text("DELETE FROM Business WHERE BusinessID = :bid"),
+                   {"bid": business_id})
+
+        # 3. Delete Phone if exists
+        if ids.PhoneID:
+            db.execute(text("DELETE FROM Phone WHERE PhoneID = :pid"),
+                       {"pid": ids.PhoneID})
+
+        # 4. Delete Website if exists
+        if ids.WebsitesID:
+            db.execute(text("DELETE FROM Websites WHERE WebsitesID = :wid"),
+                       {"wid": ids.WebsitesID})
+
+        # 5. Delete Address if exists
+        if ids.AddressID:
+            db.execute(text("DELETE FROM Address WHERE AddressID = :aid"),
+                       {"aid": ids.AddressID})
+
+        db.commit()
+        return {"message": "Account deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

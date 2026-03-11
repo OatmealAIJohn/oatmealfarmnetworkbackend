@@ -35,16 +35,6 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Create Artifact Registry repository if it doesn't exist
-        run: |
-          if ! gcloud artifacts repositories describe $GAR_REPOSITORY \
-            --location=$GAR_LOCATION --format="value(name)" 2>/dev/null; then
-            gcloud artifacts repositories create $GAR_REPOSITORY \
-              --repository-format=docker \
-              --location=$GAR_LOCATION \
-              --description="Docker repository"
-          fi
-
       - name: Configure Docker for GAR
         run: gcloud auth configure-docker $GAR_LOCATION-docker.pkg.dev --quiet
 

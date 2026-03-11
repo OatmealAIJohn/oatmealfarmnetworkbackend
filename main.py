@@ -22,12 +22,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://oatmealfarmnetwork-802455386518.us-central1.run.app",
-        "https://oatmealfarmnewtorkbackend-802455386518.us-central1.run.app",
-    ],
+   allow_origins=[
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://oatmealfarmnetwork-802455386518.us-central1.run.app",
+    "https://oatmealfarmnewtorkbackend-802455386518.us-central1.run.app",
+    "https://crop-detection-dcecevhvh5ard2ah.eastus-01.azurewebsites.net",  # add this
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
